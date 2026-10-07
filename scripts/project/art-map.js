@@ -90,5 +90,21 @@ export const ART = {
   "stepLeft": 88,
   "stepRight": 89,
   "jointOuter": 90,
-  "jointCopper": 91
+  "jointCopper": 91,
+  "switchClosedAligned": 92,
+  "outlineBattery": 93,
+  "outlineResistor": 94,
+  "outlineBulb": 95,
+  "outlineSwitchOpen": 96,
+  "outlineSwitchClosed": 97,
+  "outlineVoltmeter": 98,
+  "outlineAmmeter": 99,
+  "outlineMini": 100,
+  "outlineWire": 101,
+  "settingsPanel": 102,
+  "outlineWireCap": 103,
+  "outlineSchematicWire": 104,
+  "outlineSchematicCap": 105,
+  "deleteCompact": 106,
+  "cutWireDisabled": 107
 };
