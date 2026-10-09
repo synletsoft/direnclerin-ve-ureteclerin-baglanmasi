@@ -2,9 +2,16 @@ import { ART } from './art-map.js';
 
 // Components and UI are Construct Sprite/Text instances. The script only handles
 // topology, the DC nodal solver, and linked drag/measurement state.
-// The work area follows the hand-drawn safe region in the supplied screenshot.
-// Full component silhouettes and terminal rings stay inside these edges.
-const STAGE = { left: 235, right: 1605, top: 115, bottom: 930 };
+// The whole layout is usable except for the actual HUD surfaces.
+const STAGE = { left: 0, right: 1920, top: 0, bottom: 1080 };
+const HUD_AREAS = [
+  {left:0,right:145,top:105,bottom:830},
+  {left:0,right:140,top:831,bottom:890},
+  {left:38,right:102,top:898,bottom:952},
+  {left:0,right:140,top:968,bottom:1026},
+  {left:1642,right:1920,top:205,bottom:845},
+  {left:1370,right:1920,top:15,bottom:125}
+];
 const SNAP = 48;
 const TERMINAL_RING_SIZE = 58;
 const WIRE_DEFAULT_LENGTH = 190;
@@ -18,7 +25,7 @@ const TR_NAMES = {wire:'Kablo',battery:'Pil',bulb:'Ampul',resistor:'Direnç',swi
 const DIM = {battery:[200,68],resistor:[206,118],switch:[217,162],bulb:[208,237],
   ammeter:[213,213],voltmeter:[261,213],mini:[208,131]};
 const TERMINALS = {battery:[[-96,0],[96,0]],resistor:[[-99,29],[99,29]],
-  switch:[[-99,62],[104,62]],bulb:[[-99,86],[99,86]]};
+  switch:[[-99,62],[104,62]],bulb:[[-99,86],[99,86]],mini:[[-96,43],[96,43]]};
 const PANEL_SCALE = .75;
 // Coordinates measured from the source "... genel" compositions. Each
 // control keeps the same source size and centre after the shared scale.
@@ -70,7 +77,8 @@ function setup(runtime) {
   const local=(p,x,y)=>({x:p.x+(x*Math.cos(p.angle)-y*Math.sin(p.angle))*state.scale,
     y:p.y+(x*Math.sin(p.angle)+y*Math.cos(p.angle))*state.scale});
   const inside=(x,y,x0,y0,w,h)=>x>=x0&&x<=x0+w&&y>=y0&&y<=y0+h;
-  const inStage=(x,y)=>inside(x,y,STAGE.left,STAGE.top,STAGE.right-STAGE.left,STAGE.bottom-STAGE.top);
+  const inStage=(x,y)=>inside(x,y,0,0,STAGE.right,STAGE.bottom)&&
+    !HUD_AREAS.some(b=>inside(x,y,b.left,b.top,b.right-b.left,b.bottom-b.top));
   const mouse=e=>layer.cssPxToLayer(e.clientX,e.clientY);
   const sprite=(key,zone,x,y,w,h)=>{
     const s=obj('circuitArt').createInstance(zone,x,y);
@@ -123,6 +131,9 @@ function setup(runtime) {
   art('pieceBattery','hud',34,860,44,15);
   art('schematicBattery','hud',106,860,44,25);
   schematicView.opacity=.5;
+  const currentToggle=art('viewFrame','hud',70,925,62,48);
+  const currentDisc=text('●','hud',50,905,40,40,32,[.02,.56,.82],'center',true);
+  const currentMinus=text('−','hud',50,905,40,40,23,[1,1,1],'center',true);
   const zoomOut=art('zoomOut','hud',34,996,58,52);
   const zoomIn=art('zoomIn','hud',106,996,58,52);
   art('menuIcon','hud',1638,69,99,100);
@@ -145,6 +156,12 @@ function setup(runtime) {
   const readout=text('','hud',1350,568,235,75,20,[.11,.2,.3]);readout.isVisible=false;
   const settingsItems=[settingsTitle,optCurrent,optType,optLabels,optValues];
   settingsItems.forEach(item=>item.isVisible=false);
+  function toggleCurrent(){
+    state.showCurrent=!state.showCurrent;
+    currentToggle.opacity=state.showCurrent?1:.5;
+    currentDisc.opacity=currentMinus.opacity=state.showCurrent?1:.3;
+    setText(optCurrent,(state.showCurrent?'☑':'☐')+' Elektron akışı');beep();
+  }
   const formula=text('V = I·R     |     Seri: Rₑ = ΣR     |     Paralel: 1/Rₑ = Σ(1/R)','hud',288,1022,1325,45,22,[.18,.22,.3],'center');
   formula.isVisible=false;
   const parameter=art('parameterBattery','hud',930,971,846*PANEL_SCALE,200*PANEL_SCALE);
@@ -162,17 +179,41 @@ function setup(runtime) {
   smallTip.isVisible=false;
 
   // Flexible instrument leads reuse the supplied cable texture along a curve.
-  function makeLead(color){return Array.from({length:28},()=>art(color==='red'?'wireRed':'wireBlack','wires',0,0,8,6));}
-  function drawLead(segments,start,end,bend=1){
+  function makeLead(color){return Array.from({length:28},()=>art(color==='red'?'wireRed':'wireBlack','instrumentLeads',0,0,8,6));}
+  function leadPath(start,end,bend=1,exit='down'){
     const f=state.scale,drop=Math.max(55*f,Math.min(180*f,Math.hypot(end.x-start.x,end.y-start.y)*.45));
-    const c1={x:clamp(start.x+bend*25*f,STAGE.left,STAGE.right),y:clamp(start.y+drop,STAGE.top,STAGE.bottom)};
-    const c2={x:clamp(end.x+bend*45*f,STAGE.left,STAGE.right),y:clamp(end.y+drop,STAGE.top,STAGE.bottom)};
-    const point=t=>{const u=1-t;return {x:u*u*u*start.x+3*u*u*t*c1.x+3*u*t*t*c2.x+t*t*t*end.x,
-      y:u*u*u*start.y+3*u*u*t*c1.y+3*u*t*t*c2.y+t*t*t*end.y};};
-    let before=start;
-    segments.forEach((seg,i)=>{const next=point((i+1)/segments.length),dx=next.x-before.x,dy=next.y-before.y;
-      seg.setPosition((before.x+next.x)/2,(before.y+next.y)/2);
-      seg.setSize(Math.hypot(dx,dy)+2*f,6*f);seg.angle=Math.atan2(dy,dx);before=next;});
+    // A side jack has a fixed straight outlet before the flexible cable bends.
+    const horizontal=exit==='side';
+    const outlet=horizontal?[start,{x:start.x+bend*30*f,y:start.y},
+      ...Array.from({length:4},(_,i)=>{const a=(i+1)*Math.PI/8;return {
+        x:start.x+bend*(30+15*Math.sin(a))*f,y:start.y+15*(1-Math.cos(a))*f};}),
+      {x:start.x+bend*45*f,y:start.y+30*f}]:[start,{x:start.x,y:start.y+12*f}];
+    const neck=outlet.at(-1);
+    const c1={x:neck.x,y:clamp(neck.y+drop,STAGE.top,STAGE.bottom)};
+    // Approach a probe from below and from its inner side so the return loop
+    // stays clear of the long handle instead of tracing over its silhouette.
+    const c2={x:clamp(end.x+bend*(horizontal?-65:45)*f,STAGE.left,STAGE.right),
+      y:clamp(end.y+drop,STAGE.top,STAGE.bottom)};
+    const point=t=>{const u=1-t;return {x:u*u*u*neck.x+3*u*u*t*c1.x+3*u*t*t*c2.x+t*t*t*end.x,
+      y:u*u*u*neck.y+3*u*u*t*c1.y+3*u*t*t*c2.y+t*t*t*end.y};};
+    const count=29-outlet.length;
+    return [...outlet,...Array.from({length:count},(_,i)=>point((i+1)/count))];
+  }
+  function drawLead(segments,start,end,bend=1,exit='down'){
+    const f=state.scale,points=leadPath(start,end,bend,exit);
+    segments.forEach((seg,i)=>{const before=points[i],next=points[i+1],dx=next.x-before.x,dy=next.y-before.y;
+      const length=Math.hypot(dx,dy),first=i===0,shift=first?f/2:0;
+      // Overlap only toward the next segment, never back over the socket.
+      seg.setPosition((before.x+next.x)/2+dx/(length||1)*shift,(before.y+next.y)/2+dy/(length||1)*shift);
+      seg.setSize(length+(first?1:2)*f,6*f);seg.angle=Math.atan2(dy,dx);});
+  }
+  function instrumentLeads(p){
+    const f=state.scale;
+    if(p.kind==='voltmeter')return [[p.redLead,local(p,-130.5,82),
+      {x:p.probeRed.x-52*.7*f,y:p.probeRed.y+298*.7*f},-1,'side'],
+      [p.blackLead,local(p,130.5,82),{x:p.probeBlack.x+53*.7*f,y:p.probeBlack.y+298*.7*f},1,'side']];
+    if(p.kind==='ammeter')return [[p.sensorLead,local(p,-1,96),{x:p.sensorPoint.x,y:p.sensorPoint.y+67*f},-1]];
+    return [];
   }
   function syncProbe(point){
     if(point.anchor&&state.parts.includes(point.anchor.p))Object.assign(point,ends(point.anchor.p)[point.anchor.index]);
@@ -187,18 +228,15 @@ function setup(runtime) {
         const tipX=side<0?60:8,tipY=2,probeScale=.7*f;
         probe.setSize(69*probeScale,305*probeScale);
         probe.setPosition(point.x+(34.5-tipX)*probeScale,point.y+(152.5-tipY)*probeScale);
-        const bottomX=side<0?8:61;
-        drawLead(lead,local(p,side*80,98),{x:point.x+(bottomX-tipX)*probeScale,y:point.y+298*probeScale},side);
+        probe.moveToTop();
       }
     }
     if(p.kind==='ammeter'&&p.sensor){
       p.sensor.setPosition(p.sensorPoint.x,p.sensorPoint.y);p.sensor.setSize(108*f,144*f);
-      drawLead(p.sensorLead,local(p,0,103),{x:p.sensorPoint.x,y:p.sensorPoint.y+67*f});
+      p.sensor.moveToTop();
     }
-    if(p.kind==='mini'){
-      drawLead(p.redLead,local(p,-99,43),p.p0,-1);
-      drawLead(p.blackLead,local(p,99,43),p.p1,1);
-    }
+    for(const [segments,start,end,bend,exit] of instrumentLeads(p))drawLead(segments,start,end,bend,exit);
+    if(p.kind==='mini')for(const marker of [...p.term,...p.jointOuter,...p.jointInner])marker.moveToTop();
     if(p.reading){
       const [w,h,font,top]=p.kind==='voltmeter'?[187,67,42,-99]:p.kind==='ammeter'?[194,68,43,-100]:[142,46,30,-60];
       p.reading.setSize(w*f,h*f);p.reading.sizePt=font*f;p.reading.fontFace='Arial Black';
@@ -219,7 +257,7 @@ function setup(runtime) {
     if(p.nameLabel)p.nameLabel.setPosition(p.x-120*state.scale,p.y+(p.kind==='bulb'?137:120)*state.scale);
   };
   function ends(p) {
-    if(p.kind==='wire'||p.kind==='mini')return [p.p0,p.p1];
+    if(p.kind==='wire')return [p.p0,p.p1];
     return (TERMINALS[p.kind]||[]).map(([x,y])=>local(p,x,y));
   }
   function makeCurrentNode(){
@@ -340,17 +378,19 @@ function setup(runtime) {
     }
     if(kind==='voltmeter'){
       p.redLead=makeLead('red');p.blackLead=makeLead('black');
-      p.red=art('probeRed','meters',x-112,y+110,48.3,213.5);
-      p.black=art('probeBlack','meters',x+112,y+110,48.3,213.5);
-      p.probeRed={p,x:x-170*state.scale,y:y+40*state.scale,side:-1};
-      p.probeBlack={p,x:x+170*state.scale,y:y+40*state.scale,side:1};
+      p.red=art('probeRed','instrumentLeads',x-112,y+110,48.3,213.5);
+      p.black=art('probeBlack','instrumentLeads',x+112,y+110,48.3,213.5);
+      p.probeRed={p,x:x-225*state.scale,y:y+40*state.scale,side:-1};
+      p.probeBlack={p,x:x+225*state.scale,y:y+40*state.scale,side:1};
       state.probes.push(p.probeRed,p.probeBlack);
     }
     if(kind==='ammeter'){
       p.sensorPoint={x:x-165*state.scale,y:y-95*state.scale};p.sensorLead=makeLead('black');
-      p.sensor=art('miniProbe','meters',p.sensorPoint.x,p.sensorPoint.y,108,144);
+      p.sensor=art('miniProbe','instrumentLeads',p.sensorPoint.x,p.sensorPoint.y,108,144);
     }
-    if(kind==='mini'){p.redLead=makeLead('red');p.blackLead=makeLead('black');}
+    if(kind==='mini'){
+      for(const marker of [...p.term,...p.jointOuter,...p.jointInner])marker.moveToLayer(runtime.layout.getLayer('instrumentLeads'));
+    }
     if(kind!=='wire')p.nameLabel=text(TR_NAMES[kind],'meters',x-100,y+100,200,33,18,[.17,.22,.27],'center');
     if(['battery','resistor','bulb','switch'].includes(kind)){
       p.symbol=art('schematic'+({battery:'Battery',resistor:'Resistor',bulb:'Bulb',switch:'SwitchOpen'}[kind]),'parts',x,y,...DIM[kind]);p.symbol.isVisible=false;
@@ -408,7 +448,7 @@ function setup(runtime) {
     setText(info,p?.kind==='voltmeter'
       ?'Kırmızı ve siyah probun metal uçlarını iki bağlantı noktasına taşıyın.'
       :p?.kind==='mini'
-      ?'Küçük ampermetrenin iki kablo ucunu devreye seri bağlayın.'
+      ?'Küçük ampermetrenin gövdesindeki iki bağlantı noktasını devreye seri bağlayın.'
       :p?.kind==='ammeter'
       ?'Kablolu sensörü akımını ölçeceğiniz kablonun üstüne taşıyın.'
       :'Parçayı sürükleyin; uçları birbirine yaklaştırınca bağlantı oluşur.');
@@ -516,37 +556,60 @@ function setup(runtime) {
     for(const t of allTerminals(except)){const d=Math.hypot(t.x-x,t.y-y);if(d<dist){best=t;dist=d;}}
     return best;
   }
-  const flexible=p=>p.kind==='wire'||p.kind==='mini';
+  const flexible=p=>p.kind==='wire';
   function geometrySnapshot(){return state.parts.map(p=>({p,x:p.x,y:p.y,angle:p.angle,p0:{...p.p0},p1:{...p.p1},
     red:p.probeRed&&{x:p.probeRed.x,y:p.probeRed.y},black:p.probeBlack&&{x:p.probeBlack.x,y:p.probeBlack.y},sensor:p.sensorPoint&&{...p.sensorPoint}}));}
   function restoreGeometry(snapshot){for(const v of snapshot){const p=v.p;p.x=v.x;p.y=v.y;p.angle=v.angle;Object.assign(p.p0,v.p0);Object.assign(p.p1,v.p1);
     if(v.red)Object.assign(p.probeRed,v.red);if(v.black)Object.assign(p.probeBlack,v.black);if(v.sensor)Object.assign(p.sensorPoint,v.sensor);}}
-  function visualBounds(p){
-    const f=state.scale,b={left:Infinity,right:-Infinity,top:Infinity,bottom:-Infinity};
-    const point=(x,y,pad=0)=>{b.left=Math.min(b.left,x-pad);b.right=Math.max(b.right,x+pad);
-      b.top=Math.min(b.top,y-pad);b.bottom=Math.max(b.bottom,y+pad);};
+  const overlaps=(a,b)=>a.left<b.right-.01&&a.right>b.left+.01&&a.top<b.bottom-.01&&a.bottom>b.top+.01;
+  function visualRegions(p){
+    const f=state.scale,regions=[];
+    const rect=(x,y,w,h)=>regions.push({left:x-w/2,right:x+w/2,top:y-h/2,bottom:y+h/2});
+    const segment=(a,b,pad)=>regions.push({left:Math.min(a.x,b.x)-pad,right:Math.max(a.x,b.x)+pad,
+      top:Math.min(a.y,b.y)-pad,bottom:Math.max(a.y,b.y)+pad});
     if(p.kind==='wire'){
-      for(const end of [p.p0,p.p1])point(end.x,end.y,TERMINAL_RING_SIZE*f/2);
+      for(const end of [p.p0,p.p1])rect(end.x,end.y,TERMINAL_RING_SIZE*f,TERMINAL_RING_SIZE*f);
+      const n=Math.max(1,Math.ceil(Math.hypot(p.p1.x-p.p0.x,p.p1.y-p.p0.y)/32));
+      let before=p.p0;
+      for(let i=1;i<=n;i++){const next={x:p.p0.x+(p.p1.x-p.p0.x)*i/n,y:p.p0.y+(p.p1.y-p.p0.y)*i/n};
+        segment(before,next,(WIRE_THICKNESS/2+7)*f);before=next;}
     }else{
-      const [w,h]=DIM[p.kind],c=Math.cos(p.angle),s=Math.sin(p.angle),pad=7*f;
-      for(const x of [-w/2,w/2])for(const y of [-h/2,h/2])
-        point(p.x+(x*c-y*s)*f,p.y+(x*s+y*c)*f,pad);
-      if(p.term?.length)for(const end of ends(p))point(end.x,end.y,TERMINAL_RING_SIZE*f/2);
-      if(p.kind==='mini')for(const end of [p.p0,p.p1])point(end.x,end.y,TERMINAL_RING_SIZE*f/2);
+      const [w,h]=DIM[p.kind],c=Math.abs(Math.cos(p.angle)),s=Math.abs(Math.sin(p.angle));
+      rect(p.x,p.y,(w*c+h*s+14)*f,(w*s+h*c+14)*f);
+      if(p.term?.length)for(const end of ends(p))rect(end.x,end.y,TERMINAL_RING_SIZE*f,TERMINAL_RING_SIZE*f);
       if(p.kind==='voltmeter')for(const probe of [p.probeRed,p.probeBlack]){
-        point(probe.x,probe.y-3*f,45*f);point(probe.x,probe.y+214*f,45*f);
+        const tipX=probe.side<0?60:8;
+        rect(probe.x+(34.5-tipX)*.7*f,probe.y+150.5*.7*f,54.3*f,219.5*f);
       }
-      if(p.sensorPoint){point(p.sensorPoint.x,p.sensorPoint.y,72*f);}
+      if(p.sensorPoint)rect(p.sensorPoint.x,p.sensorPoint.y,114*f,150*f);
+      for(const [,start,end,bend,exit] of instrumentLeads(p)){
+        const points=leadPath(start,end,bend,exit);
+        for(let i=1;i<points.length;i++)segment(points[i-1],points[i],4*f);
+      }
     }
-    return b;
+    return regions;
   }
-  const fitsStage=p=>{const b=visualBounds(p);return b.left>=STAGE.left-.01&&b.right<=STAGE.right+.01&&
-    b.top>=STAGE.top-.01&&b.bottom<=STAGE.bottom+.01;};
+  function visualBounds(p){
+    const regions=visualRegions(p);
+    return {left:Math.min(...regions.map(b=>b.left)),right:Math.max(...regions.map(b=>b.right)),
+      top:Math.min(...regions.map(b=>b.top)),bottom:Math.max(...regions.map(b=>b.bottom))};
+  }
+  const fitsStage=p=>visualRegions(p).every(b=>b.left>=STAGE.left-.01&&b.right<=STAGE.right+.01&&
+    b.top>=STAGE.top-.01&&b.bottom<=STAGE.bottom+.01&&!HUD_AREAS.some(h=>overlaps(b,h)));
   function fitNewPart(p){
-    const b=visualBounds(p),dx=b.left<STAGE.left?STAGE.left-b.left:b.right>STAGE.right?STAGE.right-b.right:0;
-    const dy=b.top<STAGE.top?STAGE.top-b.top:b.bottom>STAGE.bottom?STAGE.bottom-b.bottom:0;
-    if(dx||dy){rawTranslate(p,dx,dy);renderPart(p);}
-    return fitsStage(p);
+    if(fitsStage(p))return true;
+    const b=visualBounds(p),snapshot=geometrySnapshot(),xs=new Set([0,-b.left,STAGE.right-b.right]),
+      ys=new Set([0,-b.top,STAGE.bottom-b.bottom]);
+    for(const h of HUD_AREAS)for(const r of visualRegions(p))if(overlaps(r,h)){
+      xs.add(h.left-r.right);xs.add(h.right-r.left);ys.add(h.top-r.bottom);ys.add(h.bottom-r.top);
+    }
+    const near=s=>[...s].sort((a,b)=>Math.abs(a)-Math.abs(b)).slice(0,16);
+    const choices=near(xs).flatMap(dx=>near(ys).map(dy=>({dx,dy,d:dx*dx+dy*dy}))).sort((a,b)=>a.d-b.d);
+    for(const {dx,dy} of choices){
+      restoreGeometry(snapshot);rawTranslate(p,dx,dy);
+      if(fitsStage(p)){renderPart(p);return true;}
+    }
+    restoreGeometry(snapshot);return false;
   }
   function propagateGeometry(driver){
     const queue=ends(driver).map((point,index)=>({p:driver,index,point:{...point}})),assigned=new Map();
@@ -559,7 +622,7 @@ function setup(runtime) {
         if(Math.hypot(dx,dy)<.001)continue;
         if(flexible(q)){Object.assign(ref.index?q.p1:q.p0,task.point);}
         else{
-          if(rigid.has(q))return false;rigid.add(q);q.x+=dx;q.y+=dy;
+          if(rigid.has(q))return false;rigid.add(q);rawTranslate(q,dx,dy);
           ends(q).forEach((point,index)=>{if(index!==ref.index)queue.push({p:q,index,point:{...point}});});
         }
       }
@@ -572,10 +635,12 @@ function setup(runtime) {
   function geometryEdit(p,change){
     const snapshot=geometrySnapshot();
     const attempt=f=>{restoreGeometry(snapshot);change(f);return propagateGeometry(p);};
-    const before=ends(p).map(e=>({...e}));change(1);
-    const distance=Math.max(0,...ends(p).map((e,i)=>Math.hypot(e.x-before[i].x,e.y-before[i].y)));
+    const controls=()=>[p,...ends(p),...(p.kind==='mini'?[p.p0,p.p1]:[]),
+      ...[p.probeRed,p.probeBlack,p.sensorPoint].filter(Boolean)].map(e=>({x:e.x,y:e.y}));
+    const before=controls();change(1);
+    const distance=Math.max(0,...controls().map((e,i)=>Math.hypot(e.x-before[i].x,e.y-before[i].y)));
     restoreGeometry(snapshot);
-    const steps=Math.max(1,Math.min(128,Math.ceil(distance/(WIRE_MIN_LENGTH*state.scale/4))));
+    const steps=Math.max(1,Math.min(128,Math.ceil(distance/25)));
     let accepted=1;
     for(let step=1;step<=steps;step++)if(!attempt(step/steps)){
       let lo=(step-1)/steps,hi=step/steps;
@@ -587,7 +652,7 @@ function setup(runtime) {
   }
   function rawTranslate(p,dx,dy){
     p.x+=dx;p.y+=dy;
-    if(p.kind==='wire'||p.kind==='mini')for(let i=0;i<2;i++)if(p.kind==='wire'||!isConnected(p,i)){
+    if(p.kind==='wire'||p.kind==='mini')for(let i=0;i<2;i++){
       const point=i?p.p1:p.p0;point.x+=dx;point.y+=dy;
     }
     if(p.kind==='voltmeter')for(const point of [p.probeRed,p.probeBlack])if(!point.anchor){point.x+=dx;point.y+=dy;}
@@ -829,6 +894,7 @@ function setup(runtime) {
 
   function onDown(e){
     const [x,y]=mouse(e);
+    if(inside(x,y,38,898,64,54)){toggleCurrent();return;}
     if(inside(x,y,0,833,140,55)){setView(x<70?'real':'schematic');beep();return;}
     if(inside(x,y,0,970,140,58)){doZoom(x<70?.9:1.1);beep();return;}
     if(state.panelOpen&&panelBox&&inside(x,y,panelBox.left,panelBox.top,panelBox.right-panelBox.left,panelBox.bottom-panelBox.top)){
@@ -865,7 +931,7 @@ function setup(runtime) {
     }
     if(state.settingsOpen){
       if(inside(x,y,1330,310,280,230)){
-        if(y<370){state.showCurrent=!state.showCurrent;setText(optCurrent,(state.showCurrent?'☑':'☐')+' Elektron akışı');}
+        if(y<370){toggleCurrent();}
         else if(y<423){state.currentType=state.currentType==='electrons'?'conventional':'electrons';setText(optType,state.currentType==='electrons'?'Elektronlar  ⇄':'Geleneksel  ⇄');}
         else if(y<477){state.showLabels=!state.showLabels;setText(optLabels,(state.showLabels?'☑':'☐')+' Etiketler');recompute();}
         else{state.showValues=!state.showValues;setText(optValues,(state.showValues?'☑':'☐')+' Değerler');recompute();}
@@ -901,7 +967,7 @@ function setup(runtime) {
     candidates.sort((a,b)=>a.d-b.d||Number(flexible(b.p))-Number(flexible(a.p)));
     const terminal=candidates[0];
     if(terminal){
-      const p=terminal.p,index=terminal.index,rotation=!flexible(p)&&!isConnected(p,index);
+      const p=terminal.p,index=terminal.index,rotation=!flexible(p)&&p.kind!=='mini'&&!isConnected(p,index);
       select(p,false);state.drag={p,mode:rotation?'rotate':flexible(p)?'endpoint':'part',index,x,y,rawX:rotation||flexible(p)?terminal.x:p.x,rawY:rotation||flexible(p)?terminal.y:p.y,moved:false};return;
     }
     const p=findPart(x,y);
@@ -938,10 +1004,9 @@ function setup(runtime) {
       d.rawX+=dx;d.rawY+=dy;
       const full=movePart(d.p,d.rawX-d.p.x,d.rawY-d.p.y);
       if(!full){d.rawX=d.p.x;d.rawY=d.p.y;}
-      // Palette objects are only committed/snap-connected in the work area.
-      if(d.fromPalette&&inStage(x,y)){
-        fitNewPart(d.p);d.rawX=d.p.x;d.rawY=d.p.y;
-      }else if(!d.fromPalette)magnetize(d.p);
+      // Keep a new part under the pointer while crossing a panel edge. Its
+      // silhouette is fitted once on release; repeated fitting causes drift.
+      if(!d.fromPalette)magnetize(d.p);
     }
     d.moved=true;d.x=x;d.y=y;recompute();
   }
